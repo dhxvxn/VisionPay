@@ -1,4 +1,4 @@
-# Feetrack 👟
+# VisionPay 👁️💰
 An automated WhatsApp-based fee tracking system. It monitors specific WhatsApp groups for payment screenshots, extracts transaction details using OCR (Tesseract), and logs them into a local database.
 
 ## Features
@@ -18,8 +18,8 @@ An automated WhatsApp-based fee tracking system. It monitors specific WhatsApp g
 
 1. **Clone the repository**:
    ```bash
-   git clone <your-repo-url>
-   cd Feetrack
+   git clone https://github.com/dhxvxn/VisionPay.git
+   cd VisionPay
    ```
 
 2. **Create and activate a virtual environment**:
