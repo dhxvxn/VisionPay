@@ -14,6 +14,8 @@ The project includes a `cli.py` for managing data:
 - **List Students**: `python cli.py students`
 - **Add Student**: `python cli.py add-student <name> <phone> [parent_name] [parent_phone]`
   - *Note: You can add both student and parent numbers to ensure payments from either are tracked.*
+- **Delete Student**: `python cli.py delete-student <student_id>`
+  - *Removes a student record from the system (e.g., if they leave the academy).*
 - **Payment Summary**: `python cli.py summary`
   - *Shows Name, Phone Number, Transaction ID, and Photo path.*
 - **Detailed Payments**: `python cli.py payments`

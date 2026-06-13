@@ -117,8 +117,8 @@ def add_student(name, phone, parent_name=None, parent_phone=None):
 def link_payment(payment_id, student_id):
     session = get_session()
     try:
-        payment = session.query(Payment).get(payment_id)
-        student = session.query(Student).get(student_id)
+        payment = session.get(Payment, payment_id)
+        student = session.get(Student, student_id)
         if not payment:
             console.print(f"[red]Payment {payment_id} not found.[/red]")
             return
@@ -131,6 +131,25 @@ def link_payment(payment_id, student_id):
         console.print(f"[green]Payment {payment_id} linked to student {student.name}.[/green]")
     except Exception as e:
         console.print(f"[red]Error linking payment: {e}[/red]")
+        session.rollback()
+    finally:
+        session.close()
+
+def delete_student(student_id):
+    session = get_session()
+    try:
+        student = session.get(Student, student_id)
+        if student:
+            name = student.name
+            # Optionally: handle payments (delete or unlink)
+            # For now, let's just delete the student. Cascade might be set in models.py
+            session.delete(student)
+            session.commit()
+            console.print(f"[green]Successfully deleted student: {name}[/green]")
+        else:
+            console.print(f"[red]Student with ID {student_id} not found.[/red]")
+    except Exception as e:
+        console.print(f"[red]Error deleting student: {e}[/red]")
         session.rollback()
     finally:
         session.close()
@@ -166,7 +185,7 @@ def add_allowed_group(jid, name=None):
 def remove_allowed_group(group_id):
     session = get_session()
     try:
-        group = session.query(AllowedGroup).get(group_id)
+        group = session.get(AllowedGroup, group_id)
         if group:
             name = group.group_name or group.group_jid
             session.delete(group)
@@ -197,7 +216,7 @@ def fix_data():
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        console.print("Usage: python cli.py [students|payments|add-student|link-payment|allowed-groups|add-group|remove-group|fetch-groups|fix-data]")
+        console.print("Usage: python cli.py [students|payments|add-student|delete-student|link-payment|allowed-groups|add-group|remove-group|fetch-groups|fix-data]")
         sys.exit(1)
     
     cmd = sys.argv[1]
@@ -219,6 +238,11 @@ if __name__ == "__main__":
             console.print("Usage: python cli.py link-payment <payment_id> <student_id>")
         else:
             link_payment(int(sys.argv[2]), int(sys.argv[3]))
+    elif cmd == "delete-student":
+        if len(sys.argv) < 3:
+            console.print("Usage: python cli.py delete-student <student_id>")
+        else:
+            delete_student(int(sys.argv[2]))
     elif cmd == "allowed-groups":
         list_allowed_groups()
     elif cmd == "add-group":

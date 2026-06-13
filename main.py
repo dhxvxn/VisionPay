@@ -187,7 +187,7 @@ def handle_text(message: MessageEv, phone_number):
         if time.time() - data["timestamp"] < BUFFER_TIMEOUT:
             session = get_session()
             try:
-                payment = session.query(Payment).get(data["payment_id"])
+                payment = session.get(Payment, data["payment_id"])
                 if payment:
                     text_content = ""
                     if message.Message.conversation:
