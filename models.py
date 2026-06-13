@@ -11,10 +11,11 @@ class Student(Base):
     name = Column(String, nullable=False)
     parent_name = Column(String)
     phone_number = Column(String, unique=True, nullable=False)
+    parent_phone = Column(String)
     payments = relationship("Payment", back_populates="student")
 
     def __repr__(self):
-        return f"<Student(name='{self.name}', phone='{self.phone_number}')>"
+        return f"<Student(name='{self.name}', phone='{self.phone_number}', parent_phone='{self.parent_phone}')>"
 
 class Payment(Base):
     __tablename__ = 'payments'
@@ -25,6 +26,7 @@ class Payment(Base):
     date_received = Column(DateTime, default=datetime.datetime.utcnow)
     screenshot_path = Column(String)
     ocr_text = Column(Text)
+    sender_phone = Column(String)
     additional_notes = Column(Text)
     status = Column(String, default="Pending") # Pending, Verified, Rejected
     

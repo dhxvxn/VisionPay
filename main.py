@@ -2,10 +2,11 @@ import os
 import time
 import logging
 import mimetypes
+import re
 from neonize.client import NewClient
 from neonize.events import MessageEv, ReceiptEv, CallOfferEv, ConnectedEv, ConnectFailureEv, DisconnectedEv
 from neonize.utils import log
-from neonize.utils.jid import Jid2String
+from neonize.utils.jid import Jid2String, jid_is_lid
 from models import get_session, Student, Payment, AllowedGroup
 from ocr_utils import extract_payment_details
 import datetime
@@ -108,21 +109,63 @@ def handle_image(client, message: MessageEv, phone_number):
             return
 
         # 5. Find Student
-        student = session.query(Student).filter(Student.phone_number.contains(phone_number)).first()
+        # Search by phone number OR parent_phone
+        student = session.query(Student).filter(
+            (Student.phone_number.contains(phone_number)) | 
+            (Student.parent_phone.contains(phone_number))
+        ).first()
         
-        # 6. Save to Database
+        # 6. Capture caption if any
+        caption = getattr(media_msg, "caption", "")
+        
+        # 7. Try to extract amount and date from caption if OCR missed it
+        amount = details["amount"]
+        if not amount and caption:
+            amount_match = re.search(r'(?:₹|INR|Rs\.?|Amount|Paid)[\s:]*([\d,]+(?:\.\d{2})?)', caption, re.IGNORECASE)
+            if amount_match:
+                try:
+                    amount = float(amount_match.group(1).replace(',', ''))
+                except:
+                    pass
+        
+        ocr_date = details.get("date")
+        payment_date = datetime.datetime.utcnow()
+        if ocr_date:
+            # Simple heuristic to try and parse the date, or just keep it as a note if it fails
+            # For now, we'll keep the date_received as utcnow but append the OCR date to notes
+            # unless we can reliably parse it.
+            pass
+
+        # 8. Combine OCR note and Caption
+        ocr_note = details.get("note", "")
+        push_name = message.Info.Pushname
+        combined_notes = []
+        if ocr_date:
+            combined_notes.append(f"OCR Date: {ocr_date}")
+        if ocr_note:
+            combined_notes.append(f"Image Note: {ocr_note}")
+        if caption:
+            combined_notes.append(f"Caption: {caption}")
+        if not student and push_name:
+            combined_notes.append(f"Sender Name: {push_name}")
+            
+        final_notes = " | ".join(combined_notes) if combined_notes else None
+
+        # 9. Save to Database
         new_payment = Payment(
             student_id=student.id if student else None,
-            amount=details["amount"],
+            sender_phone=phone_number,
+            amount=amount,
             transaction_id=details["transaction_id"],
             screenshot_path=filepath,
             ocr_text=details["raw_text"],
+            additional_notes=final_notes,
             status="Pending"
         )
         session.add(new_payment)
         session.commit()
         
-        # 7. Update buffer for follow-up notes
+        # 10. Update buffer for follow-up notes
         recent_image_senders[phone_number] = {
             "payment_id": new_payment.id,
             "timestamp": time.time()
@@ -154,9 +197,19 @@ def handle_text(message: MessageEv, phone_number):
                     
                     if text_content:
                         if payment.additional_notes:
-                            payment.additional_notes += " | " + text_content
+                            payment.additional_notes += " | Msg: " + text_content
                         else:
-                            payment.additional_notes = text_content
+                            payment.additional_notes = "Msg: " + text_content
+                        
+                        # Try to extract amount if missing
+                        if not payment.amount:
+                            amount_match = re.search(r'(?:₹|INR|Rs\.?|Amount|Paid)[\s:]*([\d,]+(?:\.\d{2})?)', text_content, re.IGNORECASE)
+                            if amount_match:
+                                try:
+                                    payment.amount = float(amount_match.group(1).replace(',', ''))
+                                except:
+                                    pass
+                        
                         session.commit()
                         print(f"Added note to payment {payment.id}: {text_content}")
             except Exception as e:
@@ -167,7 +220,18 @@ def handle_text(message: MessageEv, phone_number):
 
 def on_message(client: NewClient, message: MessageEv):
     chat_jid = Jid2String(message.Info.MessageSource.Chat)
-    phone_number = message.Info.MessageSource.Sender.User
+    sender_jid = message.Info.MessageSource.Sender
+    
+    # Resolve LID to Phone Number if possible
+    if jid_is_lid(sender_jid):
+        try:
+            pn_jid = client.get_pn_from_lid(sender_jid)
+            phone_number = pn_jid.User
+        except Exception:
+            # Fallback to LID if resolution fails
+            phone_number = sender_jid.User
+    else:
+        phone_number = sender_jid.User
     
     # Check if the chat is allowed
     if not is_group_allowed(chat_jid):
