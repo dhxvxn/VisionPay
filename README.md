@@ -1,36 +1,95 @@
-# VisionPay 👁️💰
-An automated WhatsApp-based fee tracking system. It monitors specific WhatsApp groups for payment screenshots, extracts transaction details using OCR (Tesseract), and logs them into a local database.
+# Feetrack
+
+A WhatsApp-based fee management system for tracking student payments using OCR and automated linking.
 
 ## Features
-- **WhatsApp Integration**: Monitors specific WhatsApp groups for payment screenshots.
-- **OCR Extraction**: Automatically extracts **Amount**, **Date**, and **Transaction ID** from payment receipts using Tesseract OCR.
-- **Student-Parent Linking**: Supports linking two phone numbers (Student & Parent) to a single record, allowing either to send proof of payment.
-- **Payment Summary**: Generates a clean terminal table showing payment status, student details, and screenshot paths.
-- **LID Resolution**: Automatically resolves WhatsApp "LIDs" to actual phone numbers for accurate tracking.
 
-## CLI Commands
-The project includes a `cli.py` for managing data:
+- **Automated Payment Logging:** Captures screenshots from WhatsApp groups, extracts payment details (Amount, Transaction ID) using OCR, and links them to students.
+- **Unregistered Sender Management:** Automatically identifies payments from unknown numbers and allows for easy registration and linking.
+- **Robust OCR:** Uses multi-strategy preprocessing and keyword-based extraction to accurately identify payment amounts even from poor-quality screenshots.
+- **Rich CLI:** A comprehensive command-line interface for managing students, payments, and system maintenance.
 
-- **List Students**: `python cli.py students`
-- **Add Student**: `python cli.py add-student <name> <phone> [parent_name] [parent_phone]`
-  - *Note: You can add both student and parent numbers to ensure payments from either are tracked.*
-- **Delete Student**: `python cli.py delete-student <student_id>`
-  - *Removes a student record from the system (e.g., if they leave the academy).*
-- **Payment Summary**: `python cli.py summary`
-  - *Shows Name, Phone Number, Transaction ID, and Photo path.*
-- **Detailed Payments**: `python cli.py payments`
-- **Link Payment**: `python cli.py link-payment <payment_id> <student_id>`
-- **Manage Groups**: `python cli.py allowed-groups`, `add-group <jid>`, `remove-group <id>`
-- **Fetch Groups**: `python cli.py fetch-groups` (Connects to WA to list your group JIDs)
-- **Fix Data**: `python cli.py fix-data` (Re-runs OCR and resolves phone numbers)
+## Installation
+
+1. Install Tesseract OCR on your system.
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Set up your WhatsApp session:
+   ```bash
+   python main.py
+   ```
+   (Scan the QR code when prompted)
+
+## CLI Usage Reference
+
+The CLI tool (`cli.py`) is the primary way to interact with the system.
+
+### Student Management
+
+- **List all students:**
+  ```bash
+  python cli.py students
+  ```
+- **Add a new student:**
+  ```bash
+  python cli.py add-student "Student Name" "Phone 1" "Parent Name" "Phone 2"
+  ```
+
+### Payment Tracking
+
+- **List all payments:**
+  ```bash
+  python cli.py payments
+  ```
+- **Run data fix (LID resolution & linking):**
+  ```bash
+  python cli.py fix-data
+  ```
+
+### Unregistered Senders
+
+- **List unknown senders:**
+  ```bash
+  python cli.py unregistered
+  ```
+- **Register an unknown sender as a student:**
+  ```bash
+  python cli.py register <sender_id> "Student Name" "Parent Name" "Phone 2"
+  ```
+  *(This automatically links all their previous payments to the new profile)*
+
+### Maintenance & Re-scanning
+
+- **Re-scan missing amounts only:**
+  ```bash
+  python cli.py re-scan
+  ```
+- **Re-scan ALL screenshots in the database:**
+  ```bash
+  python cli.py re-scan --all
+  ```
+- **Re-scan a specific payment ID:**
+  ```bash
+  python cli.py re-scan <payment_id>
+  ```
+
+### System Configuration
+
+- **Add an allowed WhatsApp group:**
+  ```bash
+  python cli.py add-group <jid> "Group Name"
+  ```
+- **List all joined WhatsApp groups (to get JIDs):**
+  ```bash
+  python cli.py fetch-groups
+  ```
 
 ## Project Structure
-- `main.py`: The WhatsApp listener and OCR coordinator.
-- `cli.py`: Command-line management tool.
-- `models.py`: Database schema (SQLAlchemy).
-- `ocr_utils.py`: OCR logic for extracting text from images.
-- `screenshots/`: Local storage for downloaded payment proofs.
-- `feetrack.db`: SQLite database containing all records.
 
-## License
-MIT
+- `main.py`: The WhatsApp listener and real-time processor.
+- `cli.py`: The command-line management tool.
+- `models.py`: Database schema (SQLAlchemy).
+- `ocr_utils.py`: Image processing and OCR logic.
+- `fix_data.py`: Background utility for resolving LIDs and fixing legacy data.

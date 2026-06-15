@@ -10,12 +10,12 @@ class Student(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     parent_name = Column(String)
-    phone_number = Column(String, unique=True, nullable=False)
-    parent_phone = Column(String)
+    parent_phone_1 = Column(String, unique=True, nullable=False)
+    parent_phone_2 = Column(String)
     payments = relationship("Payment", back_populates="student")
 
     def __repr__(self):
-        return f"<Student(name='{self.name}', phone='{self.phone_number}', parent_phone='{self.parent_phone}')>"
+        return f"<Student(name='{self.name}', phone1='{self.parent_phone_1}', phone2='{self.parent_phone_2}')>"
 
 class Payment(Base):
     __tablename__ = 'payments'
@@ -34,6 +34,17 @@ class Payment(Base):
 
     def __repr__(self):
         return f"<Payment(amount={self.amount}, status='{self.status}')>"
+
+class UnregisteredSender(Base):
+    __tablename__ = 'unregistered_senders'
+    id = Column(Integer, primary_key=True)
+    sender_phone = Column(String, unique=True, nullable=False)
+    push_name = Column(String)
+    last_screenshot_path = Column(String)
+    first_seen = Column(DateTime, default=datetime.datetime.utcnow)
+
+    def __repr__(self):
+        return f"<UnregisteredSender(phone='{self.sender_phone}', name='{self.push_name}')>"
 
 class AllowedGroup(Base):
     __tablename__ = 'allowed_groups'
