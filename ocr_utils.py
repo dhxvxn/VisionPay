@@ -63,15 +63,10 @@ def extract_payment_details(image_path):
 
 def _parse_text_for_details(text):
     # Check if it's likely a payment screenshot
-    payment_keywords = ['successful', 'transaction', 'utr', 'upi', 'paid', 'sent', 'debited', 'received', 'transfer', 'reference']
+    payment_keywords = ['successful', 'transaction', 'utr', 'upi', 'paid', 'sent', 'debited', 'received', 'transfer', 'reference', 'fee', 'payment', 'amt', 'total']
     text_lower = text.lower()
     is_likely_payment = any(kw in text_lower for kw in payment_keywords)
     
-    if not is_likely_payment:
-        # If no keywords, it might still be a payment but OCR is poor.
-        # But for now, let's be strict to avoid false positives from ads.
-        pass
-
     # Regex patterns for Amount with high priority keywords
     priority_amount_patterns = [
         r'Successfully\s+paid[\s:]*(?:₹|INR|Rs\.?|~|z|2|«)?\s*([\d,]+(?:\.\d{2})?)',
@@ -79,6 +74,7 @@ def _parse_text_for_details(text):
         r'Sent\s+([\d,]+(?:\.\d{2})?)',
         r'Amount[\s:]*(?:₹|INR|Rs\.?|~|z|2|«)?\s*([\d,]+(?:\.\d{2})?)',
         r'Total\s+Paid[\s:]*(?:₹|INR|Rs\.?|~|z|2|«)?\s*([\d,]+(?:\.\d{2})?)',
+        r'Fee[\s:]*(?:₹|INR|Rs\.?|~|z|2|«)?\s*([\d,]+(?:\.\d{2})?)',
     ]
     
     # Try priority patterns first
@@ -92,12 +88,9 @@ def _parse_text_for_details(text):
             except ValueError:
                 continue
                 
-    if not is_likely_payment:
-        return _finalize_details(None, text)
-
-    # General patterns only if it's likely a payment
+    # If no priority, but it IS a likely payment, look for ANY amount with currency symbol
     general_amount_patterns = [
-        r'(?:₹|INR|Rs\.?|~|z|«)[\s:]*([\d,]+(?:\.\d{2})?)',
+        r'(?:₹|INR|Rs\.?|~|z|«|@)[\s:]*([\d,]+(?:\.\d{2})?)',
         r'([\d,]+\.\d{2})',
     ]
     
@@ -112,7 +105,7 @@ def _parse_text_for_details(text):
             except ValueError:
                 continue
     
-    if not all_amounts:
+    if not all_amounts and is_likely_payment:
         potential_numbers = re.findall(r'(?<!\d)(?:₹|Rs\.?|~|z|«)?\s*([\d,]{3,})(?!\d)', text)
         for m in potential_numbers:
             try:
@@ -124,6 +117,7 @@ def _parse_text_for_details(text):
 
     final_amount = None
     if all_amounts:
+        # If it's a likely payment, take the first one found or max
         final_amount = max(all_amounts)
 
     return _finalize_details(final_amount, text)

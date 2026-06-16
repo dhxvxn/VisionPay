@@ -7,6 +7,7 @@ from models import get_session, Student, Payment, UnregisteredSender
 from ocr_utils import extract_payment_details
 from neonize.utils.jid import build_jid, jid_is_lid, JID
 import sys
+import difflib
 
 from sqlalchemy import literal
 
@@ -47,6 +48,30 @@ def fix_payments(client: NewClient):
                     (literal(p.sender_phone).contains(Student.parent_phone_1))
                 ).first()
                 
+                # Fuzzy Name Matching if Phone fails
+                if not student and p.ocr_text:
+                    all_students = session.query(Student).all()
+                    ocr_words = p.ocr_text.replace('\n', ' ').split()
+                    
+                    for s in all_students:
+                        # 1. Direct check
+                        if s.name.lower() in p.ocr_text.lower():
+                            student = s
+                            print(f"  Fuzzy Linked {p.id} to {s.name} (Direct match)")
+                            break
+                        
+                        # 2. Fuzzy word-by-word check
+                        for word in ocr_words:
+                            clean_word = "".join(c for c in word if c.isalnum()).lower()
+                            if len(clean_word) >= 4:
+                                ratio = difflib.SequenceMatcher(None, s.name.lower(), clean_word).ratio()
+                                if ratio > 0.7: # Slightly lower threshold for garbled OCR
+                                    student = s
+                                    print(f"  Fuzzy Linked {p.id} to {s.name} (Conf: {ratio:.2f})")
+                                    break
+                            if student: break
+                        if student: break
+
                 if student:
                     p.student_id = student.id
                     print(f"  Linked payment {p.id} to student: {student.name}")
@@ -63,7 +88,7 @@ def fix_payments(client: NewClient):
                         print(f"  Added unknown sender {p.sender_phone} to Unregistered list.")
                     else:
                         unregistered.last_screenshot_path = p.screenshot_path
-                    updated = True # Consider it 'fixed'/updated as we handled the unregistered status
+                    updated = True
 
             # 3. Re-run OCR if amount is missing or was 0
             if (p.amount is None or p.amount == 0) and p.screenshot_path and os.path.exists(p.screenshot_path):

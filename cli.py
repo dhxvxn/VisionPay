@@ -89,7 +89,6 @@ def register_sender(sender_id, name, parent_name=None, other_phone=None):
             console.print(f"[red]Sender {sender_id} not found.[/red]")
             return
         
-        # Create new student
         new_student = Student(
             name=name,
             parent_name=parent_name,
@@ -97,16 +96,13 @@ def register_sender(sender_id, name, parent_name=None, other_phone=None):
             parent_phone_2=other_phone
         )
         session.add(new_student)
-        session.flush() # Get student.id
+        session.flush()
         
-        # Link all payments from this phone to the new student
         payments = session.query(Payment).filter(Payment.sender_phone == sender.sender_phone).all()
         for p in payments:
             p.student_id = new_student.id
             
-        # Delete from unregistered
         session.delete(sender)
-        
         session.commit()
         console.print(f"[green]Successfully registered {name} and linked {len(payments)} payments.[/green]")
     except Exception as e:
@@ -115,8 +111,53 @@ def register_sender(sender_id, name, parent_name=None, other_phone=None):
     finally:
         session.close()
 
+def link_sender_to_student(sender_id, student_id):
+    session = get_session()
+    try:
+        sender = session.get(UnregisteredSender, sender_id)
+        student = session.get(Student, student_id)
+        
+        if not sender:
+            console.print(f"[red]Sender {sender_id} not found.[/red]")
+            return
+        if not student:
+            console.print(f"[red]Student {student_id} not found.[/red]")
+            return
+            
+        if not student.parent_phone_2:
+            student.parent_phone_2 = sender.sender_phone
+            
+        payments = session.query(Payment).filter(Payment.sender_phone == sender.sender_phone).all()
+        for p in payments:
+            p.student_id = student.id
+            
+        session.delete(sender)
+        session.commit()
+        console.print(f"[green]Successfully linked sender {sender.sender_phone} to {student.name} and updated {len(payments)} payments.[/green]")
+    except Exception as e:
+        console.print(f"[red]Error linking sender: {e}[/red]")
+        session.rollback()
+    finally:
+        session.close()
+
+def link_payment(payment_id, student_id):
+    session = get_session()
+    try:
+        payment = session.get(Payment, payment_id)
+        student = session.get(Student, student_id)
+        if not payment or not student:
+            console.print("[red]Payment or Student not found.[/red]")
+            return
+        payment.student_id = student.id
+        session.commit()
+        console.print(f"[green]Payment {payment_id} linked to {student.name}.[/green]")
+    except Exception as e:
+        console.print(f"[red]Error linking payment: {e}[/red]")
+        session.rollback()
+    finally:
+        session.close()
+
 def scan_screenshots(scan_all=False, payment_id=None):
-    """Scan command to re-run OCR on existing screenshots."""
     session = get_session()
     try:
         if payment_id:
@@ -124,13 +165,10 @@ def scan_screenshots(scan_all=False, payment_id=None):
             if not payments[0]:
                 console.print(f"[red]Payment ID {payment_id} not found.[/red]")
                 return
-            console.print(f"[yellow]Re-scanning payment ID {payment_id}...[/yellow]")
         elif scan_all:
             payments = session.query(Payment).all()
-            console.print("[yellow]Re-scanning ALL payment screenshots...[/yellow]")
         else:
             payments = session.query(Payment).filter((Payment.amount == None) | (Payment.amount == 0)).all()
-            console.print("[yellow]Scanning payments with missing amounts...[/yellow]")
             
         count = 0
         for p in payments:
@@ -143,8 +181,6 @@ def scan_screenshots(scan_all=False, payment_id=None):
                         p.transaction_id = details['transaction_id']
                     count += 1
                     console.print(f"[green]Updated payment {p.id}: ₹{p.amount}[/green]")
-                else:
-                    console.print(f"[red]Payment {p.id}: Still no amount found.[/red]")
         
         session.commit()
         console.print(f"[green]Scan complete. Updated {count} records.[/green]")
@@ -168,15 +204,11 @@ def add_student(name, phone, parent_name=None, parent_phone2=None):
         session.close()
 
 def fix_data():
-    console.print("[yellow]Running data fix script to resolve LIDs and link payments...[/yellow]")
-    try:
-        subprocess.run(["python3", "fix_data.py"])
-    except Exception as e:
-        console.print(f"[red]Error running fix script: {e}[/red]")
+    subprocess.run(["python3", "fix_data.py"])
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        console.print("Usage: python cli.py [students|payments|unregistered|register|add-student|scan|fix-data]")
+        console.print("Usage: python cli.py [students|payments|unregistered|register|link-sender|link-payment|add-student|scan|re-scan|fix-data]")
         sys.exit(1)
     
     cmd = sys.argv[1]
@@ -193,6 +225,16 @@ if __name__ == "__main__":
             parent_name = sys.argv[4] if len(sys.argv) > 4 else None
             phone2 = sys.argv[5] if len(sys.argv) > 5 else None
             register_sender(int(sys.argv[2]), sys.argv[3], parent_name, phone2)
+    elif cmd == "link-sender":
+        if len(sys.argv) < 3:
+            console.print("Usage: python cli.py link-sender <sender_id> <student_id>")
+        else:
+            link_sender_to_student(int(sys.argv[2]), int(sys.argv[3]))
+    elif cmd == "link-payment":
+        if len(sys.argv) < 3:
+            console.print("Usage: python cli.py link-payment <payment_id> <student_id>")
+        else:
+            link_payment(int(sys.argv[2]), int(sys.argv[3]))
     elif cmd == "add-student":
         if len(sys.argv) < 4:
             console.print("Usage: python cli.py add-student <name> <phone1> [parent_name] [phone2]")
@@ -200,11 +242,9 @@ if __name__ == "__main__":
             parent_name = sys.argv[4] if len(sys.argv) > 4 else None
             phone2 = sys.argv[5] if len(sys.argv) > 5 else None
             add_student(sys.argv[2], sys.argv[3], parent_name, phone2)
-    elif cmd == "scan" or cmd == "re-scan":
+    elif cmd in ["scan", "re-scan"]:
         scan_all = "--all" in sys.argv
-        payment_id = None
-        if len(sys.argv) > 2 and sys.argv[2].isdigit():
-            payment_id = int(sys.argv[2])
+        payment_id = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
         scan_screenshots(scan_all, payment_id)
     elif cmd == "fix-data":
         fix_data()
