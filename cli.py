@@ -157,6 +157,29 @@ def link_payment(payment_id, student_id):
     finally:
         session.close()
 
+def delete_student(student_id):
+    session = get_session()
+    try:
+        student = session.get(Student, student_id)
+        if not student:
+            console.print(f"[red]Student {student_id} not found.[/red]")
+            return
+        
+        name = student.name
+        # Unlink payments before deleting
+        payments = session.query(Payment).filter(Payment.student_id == student.id).all()
+        for p in payments:
+            p.student_id = None
+            
+        session.delete(student)
+        session.commit()
+        console.print(f"[green]Successfully deleted student {name} and unlinked {len(payments)} payments.[/green]")
+    except Exception as e:
+        console.print(f"[red]Error deleting student: {e}[/red]")
+        session.rollback()
+    finally:
+        session.close()
+
 def scan_screenshots(scan_all=False, payment_id=None):
     session = get_session()
     try:
@@ -208,7 +231,7 @@ def fix_data():
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        console.print("Usage: python cli.py [students|payments|unregistered|register|link-sender|link-payment|add-student|scan|re-scan|fix-data]")
+        console.print("Usage: python cli.py [students|payments|unregistered|register|link-sender|link-payment|add-student|delete-student|scan|re-scan|fix-data]")
         sys.exit(1)
     
     cmd = sys.argv[1]
@@ -242,6 +265,11 @@ if __name__ == "__main__":
             parent_name = sys.argv[4] if len(sys.argv) > 4 else None
             phone2 = sys.argv[5] if len(sys.argv) > 5 else None
             add_student(sys.argv[2], sys.argv[3], parent_name, phone2)
+    elif cmd == "delete-student":
+        if len(sys.argv) < 3:
+            console.print("Usage: python cli.py delete-student <student_id>")
+        else:
+            delete_student(int(sys.argv[2]))
     elif cmd in ["scan", "re-scan"]:
         scan_all = "--all" in sys.argv
         payment_id = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None

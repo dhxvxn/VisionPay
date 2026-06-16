@@ -36,6 +36,10 @@ The CLI tool (`cli.py`) is the primary way to interact with the system.
   ```bash
   python cli.py add-student "Student Name" "Phone 1" "Parent Name" "Phone 2"
   ```
+- **Delete a student:**
+  ```bash
+  python cli.py delete-student <student_id>
+  ```
 
 ### Payment Tracking
 
