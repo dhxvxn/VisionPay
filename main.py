@@ -8,7 +8,7 @@ from neonize.events import MessageEv, ReceiptEv, CallOfferEv, ConnectedEv, Conne
 from neonize.utils import log
 from neonize.utils.jid import Jid2String, jid_is_lid
 from models import get_session, Student, Payment, AllowedGroup, UnregisteredSender
-from ocr_utils import extract_payment_details
+from ocr_utils import extract_payment_details, extract_pdf_details, parse_payment_text
 import datetime
 from sqlalchemy import literal
 
@@ -56,8 +56,8 @@ def get_media_message(message_proto):
         return get_media_message(message_proto.ephemeralMessage.message)
     return None, None
 
-def handle_image(client, message: MessageEv, phone_number):
-    """Processes an incoming image message."""
+def handle_media(client, message: MessageEv, phone_number):
+    """Processes an incoming media message (image or PDF)."""
     session = get_session()
     try:
         # 1. Extract media message
@@ -67,33 +67,42 @@ def handle_image(client, message: MessageEv, phone_number):
 
         # 2. Download media
         try:
-            image_data = client.download_any(message.Message)
+            media_data = client.download_any(message.Message)
         except Exception as e:
             print(f"Download failed: {e}")
             return
 
-        if not image_data:
+        if not media_data:
             return
 
-        # 3. Determine extension
-        mimetype = getattr(media_msg, "mimetype", "image/jpeg")
-        extension = mimetypes.guess_extension(mimetype) or ".jpg"
+        # 3. Determine extension and type
+        mimetype = getattr(media_msg, "mimetype", "")
+        if not mimetype:
+            if msg_type == "image": mimetype = "image/jpeg"
+            elif msg_type == "document": mimetype = "application/pdf"
+            
+        extension = mimetypes.guess_extension(mimetype) or (".jpg" if msg_type == "image" else ".pdf")
         is_image = "image" in mimetype or extension.lower() in [".jpg", ".jpeg", ".png"]
+        is_pdf = "pdf" in mimetype or extension.lower() == ".pdf"
 
         timestamp = int(time.time())
-        filename = f"screenshot_{phone_number}_{timestamp}{extension}"
+        filename = f"media_{phone_number}_{timestamp}{extension}"
         filepath = os.path.join("screenshots", filename)
         
         os.makedirs("screenshots", exist_ok=True)
         with open(filepath, "wb") as f:
-            f.write(image_data)
+            f.write(media_data)
         
-        if not is_image:
+        # 4. Extract details
+        payments_found = []
+        if is_image:
+            payments_found = extract_payment_details(filepath)
+        elif is_pdf:
+            payments_found = extract_pdf_details(filepath)
+        else:
             return
 
-        # 4. Run OCR
-        details = extract_payment_details(filepath)
-        if not details:
+        if not payments_found:
             return
 
         # 5. Find Student
@@ -123,36 +132,48 @@ def handle_image(client, message: MessageEv, phone_number):
                 unregistered.last_screenshot_path = filepath
                 unregistered.push_name = push_name
 
-        # 7. Save to Payment Table
+        # 7. Supplemental info from caption
         caption = getattr(media_msg, "caption", "")
-        amount = details["amount"]
-        if not amount and caption:
-            amount_match = re.search(r'(?:₹|INR|Rs\.?|Amount|Paid)[\s:]*([\d,]+(?:\.\d{2})?)', caption, re.IGNORECASE)
-            if amount_match:
-                try:
-                    amount = float(amount_match.group(1).replace(',', ''))
-                except:
-                    pass
+        caption_details = []
+        if caption:
+            caption_details = parse_payment_text(caption)
 
-        new_payment = Payment(
-            student_id=student.id if student else None,
-            sender_phone=phone_number,
-            amount=amount,
-            transaction_id=details["transaction_id"],
-            screenshot_path=filepath,
-            ocr_text=details["raw_text"],
-            status="Pending"
-        )
-        session.add(new_payment)
-        session.commit()
-        
-        recent_image_senders[phone_number] = {
-            "payment_id": new_payment.id,
-            "timestamp": time.time()
-        }
+        # 8. Save to Payment Table
+        for i, details in enumerate(payments_found):
+            # Merge caption info if missing in this specific payment
+            if caption_details and i < len(caption_details):
+                c_det = caption_details[i]
+                if not details["amount"] and c_det["amount"]: details["amount"] = c_det["amount"]
+                if not details["transaction_id"] and c_det["transaction_id"]: details["transaction_id"] = c_det["transaction_id"]
+
+            # Check if transaction already exists
+            if details["transaction_id"]:
+                existing = session.query(Payment).filter(Payment.transaction_id == details["transaction_id"]).first()
+                if existing:
+                    continue
+
+            new_payment = Payment(
+                student_id=student.id if student else None,
+                sender_phone=phone_number,
+                amount=details["amount"],
+                transaction_id=details["transaction_id"],
+                screenshot_path=filepath,
+                ocr_text=details.get("raw_text", ""),
+                status="Pending",
+                additional_notes=f"Caption: {caption}" if caption else None
+            )
+            session.add(new_payment)
+            session.commit()
+            
+            # Update buffer with the first (or last?) payment ID
+            recent_image_senders[phone_number] = {
+                "payment_id": new_payment.id,
+                "timestamp": time.time()
+            }
+            print(f"Logged payment {i+1}: ₹{details['amount']} from {phone_number}")
         
     except Exception as e:
-        print(f"Error handling image: {e}")
+        print(f"Error handling media: {e}")
         session.rollback()
     finally:
         session.close()
@@ -172,17 +193,33 @@ def handle_text(message: MessageEv, phone_number):
                         text_content = message.Message.extendedTextMessage.text
                     
                     if text_content:
+                        # Try to parse text for missing details
+                        from ocr_utils import parse_payment_text
+                        text_details = parse_payment_text(text_content)
+                        
+                        updated = False
+                        if not payment.amount and text_details["amount"]:
+                            payment.amount = text_details["amount"]
+                            updated = True
+                        if not payment.transaction_id and text_details["transaction_id"]:
+                            payment.transaction_id = text_details["transaction_id"]
+                            updated = True
+                        
                         if payment.additional_notes:
                             payment.additional_notes += " | Msg: " + text_content
                         else:
                             payment.additional_notes = "Msg: " + text_content
                         session.commit()
             except Exception as e:
+                print(f"Error handling text: {e}")
                 session.rollback()
             finally:
                 session.close()
 
 def on_message(client: NewClient, message: MessageEv):
+    process_whatsapp_message(client, message)
+
+def process_whatsapp_message(client: NewClient, message: MessageEv):
     chat_jid = Jid2String(message.Info.MessageSource.Chat)
     sender_jid = message.Info.MessageSource.Sender
     
@@ -199,10 +236,58 @@ def on_message(client: NewClient, message: MessageEv):
         return
 
     media_msg, msg_type = get_media_message(message.Message)
-    if msg_type == "image" or (msg_type == "document" and "image" in getattr(media_msg, "mimetype", "")):
-        handle_image(client, message, phone_number)
+    if msg_type == "image" or msg_type == "document":
+        handle_media(client, message, phone_number)
     elif message.Message.conversation or message.Message.extendedTextMessage:
-        handle_text(message, phone_number)
+        # Check if it's a follow-up message
+        if phone_number in recent_image_senders:
+            handle_text(message, phone_number)
+        else:
+            # Check if it's a text-only payment receipt
+            text_content = message.Message.conversation or message.Message.extendedTextMessage.text
+            payments_found = parse_payment_text(text_content)
+            
+            if any(p["amount"] and p["transaction_id"] for p in payments_found):
+                session = get_session()
+                try:
+                    # Find Student
+                    search_phone = phone_number
+                    if search_phone.startswith('91') and len(search_phone) == 12:
+                        search_phone = search_phone[2:]
+                        
+                    student = session.query(Student).filter(
+                        (Student.parent_phone_1.contains(search_phone)) | 
+                        (Student.parent_phone_2.contains(search_phone)) |
+                        (literal(phone_number).contains(Student.parent_phone_1))
+                    ).first()
+
+                    for details in payments_found:
+                        if not details["amount"] or not details["transaction_id"]:
+                            continue
+                            
+                        # Check if transaction already exists to avoid duplicates during rescan
+                        existing = session.query(Payment).filter(Payment.transaction_id == details["transaction_id"]).first()
+                        if existing:
+                            continue
+
+                        new_payment = Payment(
+                            student_id=student.id if student else None,
+                            sender_phone=phone_number,
+                            amount=details["amount"],
+                            transaction_id=details["transaction_id"],
+                            screenshot_path="TEXT_ONLY",
+                            ocr_text=text_content,
+                            status="Pending",
+                            additional_notes="Text-only receipt"
+                        )
+                        session.add(new_payment)
+                        session.commit()
+                        print(f"Logged text-only payment: {details['amount']} from {phone_number}")
+                except Exception as e:
+                    print(f"Error handling text-only payment: {e}")
+                    session.rollback()
+                finally:
+                    session.close()
 
 def main():
     import sys

@@ -95,14 +95,15 @@ def fix_payments(client: NewClient):
                 print(f"Re-running OCR for payment ID {p.id} ({p.screenshot_path})")
                 details = extract_payment_details(p.screenshot_path)
                 if details:
-                    if details['raw_text']:
-                        p.ocr_text = details['raw_text']
-                    
-                    if details['amount']:
-                        print(f"  Extracted amount: {details['amount']}")
-                        p.amount = details['amount']
-                        if details['transaction_id'] and not p.transaction_id:
-                            p.transaction_id = details['transaction_id']
+                    first = details[0]
+                    if first['raw_text']:
+                        p.ocr_text = first['raw_text']
+
+                    if first['amount']:
+                        print(f"  Extracted amount: {first['amount']}")
+                        p.amount = first['amount']
+                        if first['transaction_id'] and not p.transaction_id:
+                            p.transaction_id = first['transaction_id']
                         updated = True
                     else:
                         print("  Still could not extract amount.")

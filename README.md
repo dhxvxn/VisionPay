@@ -4,9 +4,9 @@ A WhatsApp-based fee management system for tracking student payments using OCR a
 
 ## Features
 
-- **Automated Payment Logging:** Captures screenshots from WhatsApp groups, extracts payment details (Amount, Transaction ID) using OCR, and links them to students.
+- **Automated Payment Logging:** Captures screenshots and UPI share cards from WhatsApp groups, extracts payment details (Amount, Transaction ID) using OCR, and links them to students.
 - **Unregistered Sender Management:** Automatically identifies payments from unknown numbers and allows for easy registration and linking.
-- **Robust OCR:** Uses multi-strategy preprocessing and keyword-based extraction to accurately identify payment amounts even from poor-quality screenshots.
+- **Robust OCR:** Uses multi-strategy preprocessing (including dark-mode inversion) to accurately identify payment amounts from both light and dark-background receipts.
 - **Rich CLI:** A comprehensive command-line interface for managing students, payments, and system maintenance.
 
 ## Installation
@@ -47,6 +47,10 @@ The CLI tool (`cli.py`) is the primary way to interact with the system.
   ```bash
   python cli.py payments
   ```
+- **Link a payment to a student manually:**
+  ```bash
+  python cli.py link-payment <payment_id> <student_id>
+  ```
 - **Run data fix (LID resolution & linking):**
   ```bash
   python cli.py fix-data
@@ -58,15 +62,19 @@ The CLI tool (`cli.py`) is the primary way to interact with the system.
   ```bash
   python cli.py unregistered
   ```
-- **Register an unknown sender as a student:**
+- **Register an unknown sender as a new student:**
   ```bash
   python cli.py register <sender_id> "Student Name" "Parent Name" "Phone 2"
   ```
-  *(This automatically links all their previous payments to the new profile)*
+  *(Automatically links all their previous payments to the new profile)*
+- **Link an unknown sender to an existing student:**
+  ```bash
+  python cli.py link-sender <sender_id> <student_id>
+  ```
 
 ### Maintenance & Re-scanning
 
-- **Re-scan missing amounts only:**
+- **Re-scan payments with missing amounts:**
   ```bash
   python cli.py re-scan
   ```
@@ -74,21 +82,23 @@ The CLI tool (`cli.py`) is the primary way to interact with the system.
   ```bash
   python cli.py re-scan --all
   ```
-- **Re-scan a specific payment ID:**
+- **Re-scan a specific payment by ID:**
   ```bash
   python cli.py re-scan <payment_id>
   ```
+- **Fetch and process historical WhatsApp messages:**
+  ```bash
+  python cli.py rescan-month [limit]
+  ```
+  *(Default limit: 500 messages. Requires main.py to NOT be running.)*
 
 ### System Configuration
 
-- **Add an allowed WhatsApp group:**
-  ```bash
-  python cli.py add-group <jid> "Group Name"
-  ```
 - **List all joined WhatsApp groups (to get JIDs):**
   ```bash
-  python cli.py fetch-groups
+  python main.py --list-groups
   ```
+  *(Copy the JID, then insert it into the `allowed_groups` table in `feetrack.db` to allow the bot to monitor that group.)*
 
 ## Project Structure
 

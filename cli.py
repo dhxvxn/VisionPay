@@ -5,8 +5,50 @@ from rich.console import Console
 from rich.table import Table
 import subprocess
 from ocr_utils import extract_payment_details
+from neonize.client import NewClient
+from neonize.events import ConnectedEv
+from neonize.utils.jid import build_jid
 
 console = Console()
+
+def rescan_month(limit=500):
+    """
+    Connects to WhatsApp and fetches historical messages to find missed payments.
+    """
+    from main import process_whatsapp_message
+    import os
+    
+    client = NewClient("feetrack_session.db")
+    
+    @client.event(ConnectedEv)
+    def on_connected(client: NewClient, message: ConnectedEv):
+        console.print("[green]Connected to WhatsApp for rescan...[/green]")
+        session = get_session()
+        try:
+            groups = session.query(AllowedGroup).all()
+            for group in groups:
+                console.print(f"Fetching history for group: [magenta]{group.group_name or group.group_jid}[/magenta]")
+                try:
+                    # build_jid might be needed if group_jid is just the ID string
+                    target_jid = build_jid(group.group_jid)
+                    messages = client.get_messages(target_jid, limit=limit)
+                    console.print(f"Found {len(messages)} messages. Processing...")
+                    
+                    for msg in messages:
+                        process_whatsapp_message(client, msg)
+                        
+                except Exception as e:
+                    console.print(f"[red]Error fetching messages for {group.group_jid}: {e}[/red]")
+            
+            console.print("[bold green]Rescan complete![/bold green]")
+        finally:
+            session.close()
+            client.disconnect()
+            # We need to exit because neonize might keep the loop running
+            os._exit(0)
+
+    console.print("[yellow]Starting WhatsApp connection for rescan. Please ensure main.py is NOT running.[/yellow]")
+    client.connect()
 
 def list_students():
     session = get_session()
@@ -197,11 +239,12 @@ def scan_screenshots(scan_all=False, payment_id=None):
         for p in payments:
             if p and p.screenshot_path and os.path.exists(p.screenshot_path):
                 details = extract_payment_details(p.screenshot_path)
-                if details and details['amount']:
-                    p.amount = details['amount']
-                    p.ocr_text = details['raw_text']
-                    if details['transaction_id']:
-                        p.transaction_id = details['transaction_id']
+                if details and details[0]['amount']:
+                    first = details[0]
+                    p.amount = first['amount']
+                    p.ocr_text = first['raw_text']
+                    if first['transaction_id']:
+                        p.transaction_id = first['transaction_id']
                     count += 1
                     console.print(f"[green]Updated payment {p.id}: ₹{p.amount}[/green]")
         
@@ -274,6 +317,9 @@ if __name__ == "__main__":
         scan_all = "--all" in sys.argv
         payment_id = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
         scan_screenshots(scan_all, payment_id)
+    elif cmd == "rescan-month":
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 500
+        rescan_month(limit)
     elif cmd == "fix-data":
         fix_data()
     else:
